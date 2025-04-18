@@ -25,7 +25,8 @@ func handleConnection(conn net.Conn) {
 }
 
 func main() {
-	listener, err := net.Listen("tcp", ":4000")
+	port := ":4000"
+	listener, err := net.Listen("tcp", port)
 
 	if err != nil {
 		panic(err)
@@ -33,7 +34,7 @@ func main() {
 
 	defer listener.Close()
 
-	fmt.Println("Server listening on :4000")
+	fmt.Printf("Server listening on %s\n", port)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
