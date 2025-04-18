@@ -49,4 +49,6 @@ func main() {
 		wg.Add(1)
 		go handleConnection(conn, &wg) // Function to handle connections
 	}
+
+	wg.Wait()
 }
