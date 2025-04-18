@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"net"
+	"sync"
 )
 
-func handleConnection(conn net.Conn) { // Function to handle connections
+func handleConnection(conn net.Conn, wg *sync.WaitGroup) { // Function to handle connections
+	defer wg.Done()
 	defer conn.Close()
+
 	buf := make([]byte, 1024) // Can handle up to 1024 bytes
 
 	for { // Infinite loop to read and write from clients (echoing messages back)
@@ -32,6 +35,8 @@ func main() {
 		panic(err)
 	}
 
+	var wg sync.WaitGroup
+
 	defer listener.Close() // Close connection at the end of the program
 
 	fmt.Printf("Server listening on %s\n", port)
@@ -41,6 +46,7 @@ func main() {
 			fmt.Println("Error accepting:", err)
 			continue
 		}
-		handleConnection(conn) // Function to handle connections
+		wg.Add(1)
+		go handleConnection(conn, &wg) // Function to handle connections
 	}
 }
