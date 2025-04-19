@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -14,23 +16,65 @@ func handleConnection(conn net.Conn, wg *sync.WaitGroup) { // Function to handle
 
 	logConnection(conn) // Log clients that connect
 
-	buf := make([]byte, 1024) // Buffer that handles reading and writing
+	err := handleEcho(conn)
+	if err != nil {
+		logError(conn, err) // Echo server logic
+	}
+}
+func handleEcho(conn net.Conn) error {
+	const maxMessageSize int = 1024
+	buf := make([]byte, maxMessageSize)
+	for {
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
-	for { // Infinite loop to read and write from clients (echoing messages back)
-		n, err := conn.Read((buf)) // Read from client
+		n, err := conn.Read(buf)
 		if err != nil {
-			fmt.Println("Error reading from client:", err)
-			return
+			return err // Includes EOF
+		}
+		if n == 1024 {
+			conn.Write([]byte("Message cannot be more than 1024 bytes (1024 regular characters).\n"))
+
+			conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+			for {
+				n, err := conn.Read(buf)
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					break // finished flushing
+				}
+				if err != nil {
+					return err
+				}
+				if n < maxMessageSize {
+					break
+				}
+			}
+
+			continue
+		} else if _, err := conn.Write(buf[:n]); err != nil {
+			return err
 		}
 
-		_, err = conn.Write(buf[:n]) // Write from client
-		if err != nil {
-			fmt.Println("Error writing to client:", err)
+	}
+}
+func logError(conn net.Conn, err error) {
+
+	clientAddr := conn.RemoteAddr().String()
+	logTime := func() string {
+		return time.Now().Format(time.RFC3339)
+	}
+
+	addr := conn.RemoteAddr().String()
+	fmt.Println(err)
+	if err == io.EOF {
+		fmt.Printf("[%s] Client %s closed the connection (EOF)\n", logTime(), addr)
+	} else {
+		netErr, ok := err.(net.Error)
+		if ok && netErr.Timeout() {
+			fmt.Printf("[%s] Timeout: Client %s inactive for 30 seconds\n", logTime(), clientAddr)
 			return
 		}
 	}
-}
 
+}
 func logConnection(conn net.Conn) {
 	address := conn.RemoteAddr().String()        // Grab address, convert to string
 	timestamp := time.Now().Format(time.RFC3339) // Grab current time, format
@@ -45,8 +89,19 @@ func logDisconnection(conn net.Conn) {
 	fmt.Printf("[%s] Client %s has disconnected\n", timestamp, address)
 }
 
+func parsePortFlag() string {
+	port := flag.String("port", "4000", "Port to run the TCP server on.")
+	flag.Parse()
+
+	if (*port)[0] != ':' {
+		return ":" + *(port)
+	}
+
+	return *port
+}
 func main() {
-	port := ":4000"
+
+	port := parsePortFlag()
 	listener, err := net.Listen("tcp", port) // Set up a tcp connection on port 4000
 
 	if err != nil {
