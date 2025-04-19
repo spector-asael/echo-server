@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,6 +25,7 @@ func handleConnection(conn net.Conn, wg *sync.WaitGroup) { // Function to handle
 func handleEcho(conn net.Conn) error {
 	const maxMessageSize int = 1024
 	buf := make([]byte, maxMessageSize)
+
 	for {
 		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
@@ -31,30 +33,26 @@ func handleEcho(conn net.Conn) error {
 		if err != nil {
 			return err // Includes EOF
 		}
+
 		if n == 1024 {
 			conn.Write([]byte("Message cannot be more than 1024 bytes (1024 regular characters).\n"))
-
-			conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-			for {
-				n, err := conn.Read(buf)
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					break // finished flushing
-				}
-				if err != nil {
-					return err
-				}
-				if n < maxMessageSize {
-					break
-				}
+			if flushErr := flushExtraInput(conn, buf, maxMessageSize); flushErr != nil {
+				return flushErr
 			}
-
 			continue
-		} else if _, err := conn.Write(buf[:n]); err != nil {
-			return err
 		}
 
+		trimmed := strings.TrimSpace(string(buf[:n]))
+		if trimmed == "" {
+			continue // ignore empty input
+		}
+
+		if _, err := conn.Write([]byte(trimmed + "\n")); err != nil {
+			return err
+		}
 	}
 }
+
 func logError(conn net.Conn, err error) {
 
 	clientAddr := conn.RemoteAddr().String()
@@ -69,6 +67,7 @@ func logError(conn net.Conn, err error) {
 	} else {
 		netErr, ok := err.(net.Error)
 		if ok && netErr.Timeout() {
+			conn.Write([]byte("Connection timeout. Disconnecting...\n"))
 			fmt.Printf("[%s] Timeout: Client %s inactive for 30 seconds\n", logTime(), clientAddr)
 			return
 		}
@@ -99,6 +98,23 @@ func parsePortFlag() string {
 
 	return *port
 }
+
+func flushExtraInput(conn net.Conn, buf []byte, maxMessageSize int) error {
+	conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	for {
+		n, err := conn.Read(buf)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return nil // done flushing
+		}
+		if err != nil {
+			return err
+		}
+		if n < maxMessageSize {
+			return nil // no more overflow
+		}
+	}
+}
+
 func main() {
 
 	port := parsePortFlag()
