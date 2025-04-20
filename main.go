@@ -157,7 +157,7 @@ func newClientLogger(conn net.Conn) (*clientLogger, error) { // creates a file t
 	// Use full address (IP:Port), but change ":" to "_"
 	rawAddr := conn.RemoteAddr().String()
 	safeAddr := strings.ReplaceAll(rawAddr, ":", "_")
-	logFilePath := fmt.Sprintf("client_%s.log", safeAddr)
+	logFilePath := fmt.Sprintf("logs/client_%s.log", safeAddr)
 
 	file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	// opens file
