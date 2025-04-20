@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+type clientLogger struct {
+	file *os.File
+	ip   string
+}
 
 func handleConnection(conn net.Conn, wg *sync.WaitGroup) { // Function to handle connections
 	defer wg.Done()
@@ -25,6 +31,12 @@ func handleConnection(conn net.Conn, wg *sync.WaitGroup) { // Function to handle
 func handleEcho(conn net.Conn) error {
 	const maxMessageSize int = 1024
 	buf := make([]byte, maxMessageSize)
+
+	logger, err := newClientLogger(conn)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %v", err)
+	}
+	defer logger.Close()
 
 	for {
 		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
@@ -45,6 +57,10 @@ func handleEcho(conn net.Conn) error {
 		trimmed := strings.TrimSpace(string(buf[:n]))
 		if trimmed == "" {
 			continue // ignore empty input
+		}
+
+		if err := logger.Log(trimmed); err != nil {
+			return fmt.Errorf("failed to log message: %v", err)
 		}
 
 		if _, err := conn.Write([]byte(trimmed + "\n")); err != nil {
@@ -113,6 +129,30 @@ func flushExtraInput(conn net.Conn, buf []byte, maxMessageSize int) error {
 			return nil // no more overflow
 		}
 	}
+}
+
+func newClientLogger(conn net.Conn) (*clientLogger, error) {
+	// Use full address (IP:Port), but sanitize ":" to "_"
+	rawAddr := conn.RemoteAddr().String()
+	safeAddr := strings.ReplaceAll(rawAddr, ":", "_")
+	logFilePath := fmt.Sprintf("client_%s.log", safeAddr)
+
+	file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	return &clientLogger{file: file, ip: rawAddr}, nil
+}
+
+func (cl *clientLogger) Log(message string) error {
+	timestamp := time.Now().Format(time.RFC3339)
+	_, err := cl.file.WriteString(fmt.Sprintf("[%s] %s\n", timestamp, message))
+	return err
+}
+
+func (cl *clientLogger) Close() {
+	cl.file.Close()
 }
 
 func main() {
