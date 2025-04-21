@@ -162,7 +162,9 @@ func handleClientMessage(conn net.Conn, message string) error {
 		return nil
 	case "bye":
 		conn.Write([]byte("Goodbye!\n"))
-		return fmt.Errorf("client disconnected")
+		return nil
+	case "stop copying me":
+		conn.Write([]byte("I'm not copying you!"))
 	case "":
 		conn.Write([]byte("Say something...\n"))
 		return nil
