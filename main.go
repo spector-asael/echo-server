@@ -38,39 +38,45 @@ func handleEcho(conn net.Conn) error {
 	const maxMessageSize int = 1024
 	buf := make([]byte, maxMessageSize)
 
-	logger, err := newClientLogger(conn) // Create a clientLogger object that logs messages into a file
+	logger, err := newClientLogger(conn)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %v", err)
 	}
 	defer logger.Close()
 
 	for {
-		conn.SetReadDeadline(time.Now().Add(30 * time.Second)) // Time user out after 30 seconds
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 		n, err := conn.Read(buf)
 		if err != nil {
-			return err // Includes EOF
+			return err
 		}
 
-		if n == 1024 { // Reject input that is over 1024 bytes
+		if n == maxMessageSize {
 			conn.Write([]byte("Message cannot be more than 1024 bytes (1024 regular characters).\n"))
 			if flushErr := flushExtraInput(conn, buf, maxMessageSize); flushErr != nil {
-				// remove extra characters from the TCP Stream
 				return flushErr
 			}
 			continue
 		}
 
-		trimmed := strings.TrimSpace(string(buf[:n])) // remove spaces at the beginning of the messaage
+		trimmed := strings.TrimSpace(string(buf[:n]))
 		if trimmed == "" {
-			continue // ignore empty input from user
+			conn.Write([]byte("Say something...\n"))
+			continue
 		}
 
-		if err := logger.Log(trimmed); err != nil { // log message into file
+		// Call the message handler
+		if err := handleClientMessage(conn, trimmed); err != nil {
+			return err // If the error indicates a client disconnect, return and close the connection
+		}
+
+		// Log and echo normal input
+		if err := logger.Log(trimmed); err != nil {
 			return fmt.Errorf("failed to log message: %v", err)
 		}
 
-		if _, err := conn.Write([]byte(trimmed + "\n")); err != nil { // write message to user
+		if _, err := conn.Write([]byte(trimmed + "\n")); err != nil {
 			return err
 		}
 	}
@@ -146,6 +152,50 @@ func flushExtraInput(conn net.Conn, buf []byte, maxMessageSize int) error {
 			return nil // no more overflow
 		}
 	}
+}
+
+func handleClientMessage(conn net.Conn, message string) error {
+	// Handle "server personality" messages
+	switch strings.ToLower(message) {
+	case "hello":
+		conn.Write([]byte("Hi there!\n"))
+		return nil
+	case "bye":
+		conn.Write([]byte("Goodbye!\n"))
+		return nil
+	case "stop copying me":
+		conn.Write([]byte("I'm not copying you!"))
+	case "":
+		conn.Write([]byte("Say something...\n"))
+		return nil
+	}
+
+	// Handle command-based protocol
+	if strings.HasPrefix(message, "/") {
+		fields := strings.Fields(message)
+		cmd := strings.ToLower(fields[0])
+
+		switch cmd {
+		case "/time":
+			now := time.Now().Format(time.RFC1123)
+			conn.Write([]byte("Current time: " + now + "\n"))
+		case "/quit":
+			conn.Write([]byte("Closing connection...\n"))
+			return fmt.Errorf("client disconnected")
+		case "/echo":
+			if len(fields) > 1 {
+				echoMessage := strings.Join(fields[1:], " ")
+				conn.Write([]byte(echoMessage + "\n"))
+			} else {
+				conn.Write([]byte("Usage: /echo <message>\n"))
+			}
+		default:
+			conn.Write([]byte("Unknown command.\n"))
+		}
+		return nil
+	}
+
+	return nil
 }
 
 type clientLogger struct { // clientLogger object, so we can attach methods to it
